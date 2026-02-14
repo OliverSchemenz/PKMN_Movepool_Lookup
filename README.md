@@ -6,10 +6,10 @@ Data sourced exclusively from Bulbapedia · Gen I–VIII
 Meant for simple, time-effective move lookups, if you do not want to have many tabs open during a Nuzlocke or casual playthrough.
 
 Features:
-Lookup Movesets based on Level-Up, Tm/Hm, Breeding, and Tutoring based on choosen Generation / Game
-Basic information about every move, including Move	Type	Cat.	Pwr.	Acc.	PP
-Quick Pokemon name retrieval and autocompletion
-Save Multiple Pokemon (as many as you want) in a Roster to be featured in a sidebar for quick access
+- Lookup Movesets based on Level-Up, Tm/Hm, Breeding, and Tutoring based on choosen Generation / Game
+- Basic information about every move, including Move	Type	Cat.	Pwr.	Acc.	PP
+- Quick Pokemon name retrieval and autocompletion
+- Save Multiple Pokemon (as many as you want) in a Roster to be featured in a sidebar for quick access
 
 Upcoming Features:
 - Sort Tables
