@@ -21,5 +21,4 @@ Still under development, expect following issues:
   - no gen 7 and 9 retrieval currently
   - gen 8 still does not feature Let's go Pikachu! / Eevee! information
   - Prior Evolution double column headers
-  - mixed up Move Type Coloring
   - no special moves, event moves or transfer moves from other generations (as those are typically unavailable for most players, especially in Nuzlocke runs)
