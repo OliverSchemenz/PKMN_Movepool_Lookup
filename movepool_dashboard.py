@@ -373,7 +373,7 @@ def _has_cat(post_move_headers: list[str]) -> bool:
     return any("cat" in h.lower() for h in post_move_headers)
 
 
-def _parse_move_type_cat_pwr_acc_pp(cells, move_idx: int, has_cat: bool) -> list[str]:
+def _parse_move_type_cat_pwr_acc_pp(cells, move_idx: int, has_cat: bool, description: str = "N/F") -> list[str]:
     """Parse the common Move → Type → [Cat.] → Pwr → Acc → PP columns into HTML <td> fragments."""
     parts = []
 
@@ -382,7 +382,7 @@ def _parse_move_type_cat_pwr_acc_pp(cells, move_idx: int, has_cat: bool) -> list
     move_name = clean_text(move_cell)
     stab = is_stab(move_cell)
     cls = ' class="stab-move"' if stab else ""
-    parts.append(f"<td{cls}>{move_name}</td>")
+    parts.append(f'<td{cls}><span title="{description}" style="cursor:help;">{move_name}</span></td>')  # Adding Tooltip Move Descriptions if enabled, else "N/F"
 
     # Type
     if move_idx + 1 < len(cells):
@@ -573,6 +573,26 @@ def _get_next_section_anchor(soup: BeautifulSoup, current_anchor_id: str, sectio
     return None
 
 
+def get_move_description(move_name: str) -> str:
+    resp = requests.get(f"https://pokeapi.co/api/v2/move/{move_name.lower().replace(' ', '-')}/")
+    if not resp.ok:
+        return ""
+
+    data = resp.json()
+    entries = data.get("effect_entries", [])
+    en = next((e for e in entries if e["language"]["name"] == "en"), None)
+    if not en:
+        return ""
+
+    text = en["short_effect"]
+
+    # Replace placeholders with actual values
+    effect_chance = data.get("effect_chance")
+    if effect_chance is not None:
+        text = text.replace("$effect_chance", str(effect_chance))
+
+    return text
+
 # ─── Section parsers ─────────────────────────────────────────────────────────
 
 def parse_levelup(table, gen: int) -> str | None:
@@ -588,6 +608,11 @@ def parse_levelup(table, gen: int) -> str | None:
     cat = _has_cat(headers_text[move_idx + 1:])
     out_headers = level_headers + _common_out_headers(cat)
 
+    if level_headers[0] != "Level":
+        print("Extra Game Version Detected")
+    else:
+        print(f"Normal Level Structure, first Header: {level_headers[0]}")
+
     rows_html = []
     first_data_row = True
     for row in table.find_all("tr")[hdr_idx + 1:]:
@@ -600,10 +625,16 @@ def parse_levelup(table, gen: int) -> str | None:
         # Build row values to check for duplicate header
         row_values = []
         for i in range(move_idx):
-            #print(f"Trying to append dirty value {cells[i]} to LEVEL_UP TABLE.")
             row_values.append(clean_text(cells[i]))
-            #print(f"After Cleansing: {row_values[i]}")
-        row_values.append(clean_text(cells[move_idx]))  # Move
+
+        # Move including Tooltip Move Description
+        if show_descriptions:
+            description = get_move_description(clean_text(cells[move_idx]))
+        else:
+            description = "None"
+        print(clean_text(cells[move_idx]))
+        row_values.append(clean_text(cells[move_idx]))
+
         if move_idx + 1 < len(cells):
             row_values.append(extract_type_from_cell(cells[move_idx + 1]))  # Type
 
@@ -620,9 +651,8 @@ def parse_levelup(table, gen: int) -> str | None:
         for i in range(move_idx):
             #print(f"Trying to Append to parts dirty Value : {cells[i]} in LEVEL-UP Table.")
             val = clean_text(cells[i])
-            #print(f"After Cleansing: {val}")
             parts.append(f"<td>{val}</td>")
-        parts += _parse_move_type_cat_pwr_acc_pp(cells, move_idx, cat)
+        parts += _parse_move_type_cat_pwr_acc_pp(cells, move_idx, cat, description)
         rows_html.append("<tr>" + "".join(parts) + "</tr>")
 
     return _build_table(out_headers, rows_html)
@@ -682,8 +712,14 @@ def parse_tm_hm(table, gen: int) -> str | None:
             if tm_text == "TM":
                 continue
 
+        print(clean_text(cells[actual_move_idx]))
+        if show_extended_desc:
+            description = get_move_description(clean_text(cells[actual_move_idx]))
+        else:
+            description = "None"
+
         parts = [f"<td>{tm_text}</td>"]
-        parts += _parse_move_type_cat_pwr_acc_pp(cells, actual_move_idx, cat)
+        parts += _parse_move_type_cat_pwr_acc_pp(cells, actual_move_idx, cat, description)
         rows_html.append("<tr>" + "".join(parts) + "</tr>")
 
     return _build_table(out_headers, rows_html)
@@ -1012,6 +1048,10 @@ def save_gen():
 
 with (st.sidebar):
     st.header("🎒 Roster")
+    show_descriptions = st.checkbox("Include Move Descriptions (slow)", value=False)
+    show_extended_desc = False
+    if show_descriptions:
+        show_extended_desc = st.checkbox("Include for TM's'? (even slower)", value=False)
 
     if st.session_state.roster:
         remove_name = None
