@@ -3,10 +3,10 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import json
-import os
 import urllib.parse
 import base64
 from pathlib import Path
+import time
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,16 @@ TYPE_COLORS = {
     "ghost": "rgb(112, 65, 112)",
     "fairy": "rgb(239, 112, 239)",
 }
+
+GEN7_GAMES = [
+    ("Sun, Moon, Ultra Sun and Ultra Moon", "SMUSUM"),
+    ("Let's Go, Pikachu! and Let's Go, Eevee!", "LGPE"),
+]
+
+GEN8_GAMES = [
+    ("Sword and Shield", "SwSh"),
+    ("Brilliant Diamond and Shining Pearl", "BDSP"),
+]
 
 # ─── CSS ─────────────────────────────────────────────────────────────────────
 
@@ -148,6 +158,7 @@ def sprite_img_tag(dex_num: int, size: int = 32) -> str:
 def type_cell_html(type_name: str) -> str:
     key = type_name.strip().lower()
     bg = TYPE_COLORS.get(key, "#555")
+    #print(f"Return Background Color {bg} for {type_name}")
     return f'<span class="type-cell" style="background:{bg};display:inline-block;min-width:70px;">{type_name}</span>'
 
 
@@ -191,8 +202,9 @@ def extract_father_images(cell) -> str:
 
 
 def game_available(cell, gen) -> bool:
-    print(gen)
-    if gen == 6:
+    #print(gen)
+    if gen in (6, 7):
+        print(f"Detected Gen: {gen} | Applying alternate Tutor Availabilty Logic for cell: {cell}")
         # Gen 6+: check font color of span inside link
         # White font (rgb(255, 255, 255)) = available
         link = cell.find('a')
@@ -207,6 +219,9 @@ def game_available(cell, gen) -> bool:
 
         if "#FFFFFF" in style.upper():
             return True
+        if "#FFF" in style:
+            print(f"Gen {gen} Detection for Gen 7: found Available Tutor.")
+            return True
 
         return False
     else:
@@ -218,7 +233,8 @@ def game_available(cell, gen) -> bool:
 
 
 def clean_value(val: str) -> str:
-    """Clean up garbled numeric values from Bulbapedia's sortkey artifacts."""
+    # NOT USED
+    #print(f"Value to clean up: {val}")
     # Pattern like "04040" → "40", "08080" → "80", "120120" → "120"
     m = re.match(r"^0*(\d+)\1$", val)
     if m:
@@ -308,14 +324,14 @@ def _find_section_anchor(soup, label: str, anchor_id: str):
 def _find_table_after(anchor):
     parent = anchor
     for _ in range(5):
-        if parent.name in ("h3", "h4", "div"):
+        if parent.name in ("h3", "h4", "h5", "div"):
             break
         if parent.parent:
             parent = parent.parent
     for sibling in parent.find_all_next():
         if sibling.name == "table" and sibling.find("td"):
             return sibling
-        if sibling.name in ("h3", "h4") and sibling != parent:
+        if sibling.name in ("h3", "h4", "h5") and sibling != parent:
             break
     return None
 
@@ -375,7 +391,7 @@ def _parse_move_type_cat_pwr_acc_pp(cells, move_idx: int, has_cat: bool) -> list
     else:
         parts.append("<td>—</td>")
 
-    # Cat.
+    # Cat. modify offset to hide/show category column
     offset = move_idx + 2
     if has_cat:
         if offset < len(cells):
@@ -387,7 +403,8 @@ def _parse_move_type_cat_pwr_acc_pp(cells, move_idx: int, has_cat: bool) -> list
     # Pwr, Acc, PP
     for j in range(3):
         if offset + j < len(cells):
-            val = clean_value(clean_text(cells[offset + j]))
+            val = clean_text(cells[offset + j])
+            #print(f"After Cleansing: {val}")
             parts.append(f"<td>{val}</td>")
         else:
             parts.append("<td>—</td>")
@@ -405,19 +422,155 @@ def _common_out_headers(has_cat: bool) -> list[str]:
 
 def _is_duplicate_header_row(row_values: list[str], headers: list[str]) -> bool:
     """Check if a data row is actually a duplicate of the headers."""
-    print(f"Checking if {row_values} matches column headers: {headers}...")
+    #print(f"Checking if {row_values} matches column headers: {headers}...")
     if len(row_values) != len(headers):
-        print(f"The lengths of headers and row_values are different, Headers are \nNOT DUPLICATE.")
+        #print(f"The lengths of headers and row_values are different, Headers are \nNOT DUPLICATE.")
         return False
     # Compare cleaned/normalized values
     for rv, hv in zip(row_values, headers):
         rv_clean = rv.lower().strip()
         hv_clean = hv.lower().strip()
         if rv_clean != hv_clean:
-            print(f' Found differing element: {rv}[{rv_clean}] <> {hv}[{hv_clean}], Headers are \nNOT DUPLICATE.')
+            #print(f' Found differing element: {rv}[{rv_clean}] <> {hv}[{hv_clean}], Headers are \nNOT DUPLICATE.')
             return False
-    print("All Elements are identical, Headers are \nDUPLICATE!")
+    #print("All Elements are identical, Headers are \nDUPLICATE!")
     return True
+
+
+def _find_game_headers(soup: BeautifulSoup, gen: int) -> list[tuple[str, str, any]]:
+    # find game-specific h4 headers for Gen 7/8. Returns [(display_name, key, anchor_element), ...]
+    if gen == 7:
+        games = GEN7_GAMES
+    elif gen == 8:
+        games = GEN8_GAMES
+    else:
+        return []
+
+    found = []
+    for h4 in soup.find_all("h4"):
+        text = _normalize_text(h4.get_text(strip=True))
+        #print(f"Trying to retreive game headers from h4's: {text}")
+        for display, key in games:
+            normalized_display = _normalize_text(display)
+            if normalized_display in text or key.lower() in text:
+                found.append((display, key, h4))
+                print(f"Found game: {(display, key)} in h4: {h4}")
+                break
+            else:
+                print(f"Could not retrieve game: {(display, key)} in h4: {h4}")
+    return found
+
+
+def _normalize_text(s: str) -> str:
+    """Collapse whitespace and normalize for comparison."""
+    return re.sub(r'\s+', ' ', s.lower().replace(',', ', ')).strip()
+
+
+def _get_sections_between(start_elem, end_elem, section_keys):
+    # Extract Tables for each section between two elements (or until end of page)
+    results = {}
+    current = start_elem.find_next()
+
+    while current and current != end_elem:
+        # Check if this is relevant section header
+        for label, anchor_id in section_keys:
+            # check for span with matching id
+            if current.name == "span" and current.get("id"):
+                span_id = current.get("id", "")
+                if anchor_id.lower() in span_id.lower() or anchor_id.replace("/", "%2F").lower() in span_id.lower():
+                    # Find the table after this anchor
+                    tbl = _find_table_after(current)
+                    if tbl:
+                        parser = SECTION_PARSERS.get(label, parse_levelup)
+                        # Determine gen from context
+                        html = parser(tbl, 7)   # MODIFY DEBUG
+                        if html:
+                            display_label = DISPLAY_LABELS.get(label, label)
+                            results[display_label] = html
+                    break
+            # Also check for h5 headers (Gen 7 uses h5 for section names under h4 game headers)
+            if current.name in ("h4", "h5"):
+                header_text = current.get_text(strip=True).lower()
+                if label.lower() in header_text:
+                    tbl = _find_table_after(current)
+                    if tbl:
+                        parser = SECTION_PARSERS.get(label, parse_levelup)
+                        html = parser(tbl, 7)
+                        if html:
+                            display_label = DISPLAY_LABELS.get(label, label)
+                            results[display_label] = html
+                    break
+
+        current = current.find_next()
+
+    return results
+
+
+def _detect_gen8_games(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    # Detect which Gen 8 games a Pokémon is available in from intro paragraph
+    for p in soup.find_all("p"):
+        text = p.get_text(strip=True).lower()
+        if "is available in" in text:
+            games = []
+            if "sword and shield" in text:
+                games.append(("Sword and Shield", "SwSh"))
+            if "brilliant diamond" in text:
+                games.append(("Brilliant Diamond and Shining Pearl", "BDSP"))
+            if games:
+                return games
+    # If no intro found = SqSh Only
+    return [("Sword and Shield", "SwSh")]
+
+
+def _find_gen8_section_tables(section_anchor, next_section_anchor) -> dict[str, any]:
+    # find all tables in a Gen 8 section, grouped by game marker
+    # return {"shared": table, "SwSh": table, "BDSP": table,} whichever exists
+    results = {}
+    current = section_anchor.find_next()
+
+    pending_game = None # track most recent game marker seen
+
+    while current:
+        # Stop for next section
+        if current.name == "h4" and current != section_anchor:
+            break
+        if next_section_anchor and current == next_section_anchor:
+            break
+
+        # check for game marker:
+        if current.name == "p":
+            p_text = current.get_text(strip=True)
+            if p_text in ("SwSh", "BDSP") or "Sw" in p_text and "Sh" in p_text:
+                pending_game = "SwSh"
+            elif "BD" in p_text and "SP" in p_text:
+                pending_game = "BDSP"
+
+        # Found a table
+        if current.name == "table" and current.find("td"):
+            if pending_game:
+                results[pending_game] = current
+                pending_game = None
+            elif "shared" not in results:
+                # first table without marker = shared
+                results["shared"] = current
+
+        current = current.find_next()
+
+    return results
+
+
+def _get_next_section_anchor(soup: BeautifulSoup, current_anchor_id: str, section_keys) -> any:
+    # find anchor for next section after current one
+    found_current = False
+    for label, anchor_id in section_keys:
+        if anchor_id == current_anchor_id:
+            found_current = True
+            continue
+        if found_current:
+            anchor = _find_section_anchor(soup, label, anchor_id)
+            if anchor:
+                return anchor
+    return None
 
 
 # ─── Section parsers ─────────────────────────────────────────────────────────
@@ -447,7 +600,9 @@ def parse_levelup(table, gen: int) -> str | None:
         # Build row values to check for duplicate header
         row_values = []
         for i in range(move_idx):
-            row_values.append(clean_value(clean_text(cells[i])))
+            #print(f"Trying to append dirty value {cells[i]} to LEVEL_UP TABLE.")
+            row_values.append(clean_text(cells[i]))
+            #print(f"After Cleansing: {row_values[i]}")
         row_values.append(clean_text(cells[move_idx]))  # Move
         if move_idx + 1 < len(cells):
             row_values.append(extract_type_from_cell(cells[move_idx + 1]))  # Type
@@ -455,15 +610,17 @@ def parse_levelup(table, gen: int) -> str | None:
         # Skip if this row is a duplicate of the headers
         if first_data_row:
             first_data_row = False
-            print(f"LEVEL UP TABLE HAS FOLLOWING HEADERS: {out_headers}, and following first row_values: {row_values}")
+            #print(f"LEVEL UP TABLE HAS FOLLOWING HEADERS: {out_headers}, and following first row_values: {row_values}")
             #if _is_duplicate_header_row(row_values[:len(out_headers)], out_headers):
             if row_values[0] == "Level" or row_values[0] == out_headers[0]:
-                print(f"SKIPPED ADDING FIRST ROW: DUPLICATE COLUMN HEADS")
+                #print(f"SKIPPED ADDING FIRST ROW: DUPLICATE COLUMN HEADS")
                 continue
 
         parts = []
         for i in range(move_idx):
-            val = clean_value(clean_text(cells[i]))
+            #print(f"Trying to Append to parts dirty Value : {cells[i]} in LEVEL-UP Table.")
+            val = clean_text(cells[i])
+            #print(f"After Cleansing: {val}")
             parts.append(f"<td>{val}</td>")
         parts += _parse_move_type_cat_pwr_acc_pp(cells, move_idx, cat)
         rows_html.append("<tr>" + "".join(parts) + "</tr>")
@@ -662,7 +819,9 @@ def parse_prior_evo(table, gen: int) -> str | None:
         # Skip if this row is a duplicate of the headers
         if first_data_row:
             first_data_row = False
-            if _is_duplicate_header_row(row_values[:len(out_headers)], out_headers):
+            #if _is_duplicate_header_row(row_values[:len(out_headers)], out_headers):
+            #print(f"ROW VALUES FOR BY_PRIOR EVOLUTION: {row_values}")
+            if row_values[0] == "Stage":
                 continue
 
         parts = []
@@ -722,10 +881,113 @@ def fetch_learnset(pokemon_name: str, gen: int) -> dict[str, str] | None:
     return results
 
 
+def fetch_learnset_multi_game(pokemon_name: str, gen: int) -> dict[str, dict[str, str]] | dict[str, str] | None:
+    # Fetch learnset, returning either:
+    # dict[game_key, dict[section, html]] for gen 7/8 with multiple games
+    # dict[section, html] for other gens (simple game)
+    # None on Error
+    encoded = urllib.parse.quote(f"{pokemon_name}_(Pokémon)/Generation_{ROMAN[gen]}_learnset")
+    url = f"https://bulbapedia.bulbagarden.net/wiki/{encoded}"
+
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=20)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        st.error(f"Failed to fetch learnset: {e}")
+        return None
+
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    # ─── Gen 7: h4 = game headers, h5 = sections ───────────────────────────
+    if gen == 7:    # DEBUG
+        game_headers = _find_game_headers(soup, gen)
+        if len(game_headers) >= 2:
+            print("Multiple Games Detected")
+            results = {}
+            for i, (display, key, h4_elem) in enumerate(game_headers):
+                # end element is either next game header, or None
+                end_elem = game_headers[i + 1][2] if i + 1 < len(game_headers) else None
+                sections = _get_sections_between(h4_elem, end_elem, SECTION_KEYS)
+                if sections:
+                    print("SECTION FOUND TO APPEND TO RESULTS")
+                    results[key] = {"_display": display, **sections}
+                else:
+                    print("NO SECTION FOUND TO APPEND TO RESULTS")
+            if results:
+                return results
+
+    # ─── Gen 8: h4 = sections, game markers before tables ──────────────────
+    elif gen == 8:
+        available_games = _detect_gen8_games(soup)
+
+        if len(available_games) >= 2:
+            # Init results for each game
+            results = {key: {"_display": display} for display, key in available_games}
+
+            # parse each section
+            for label, anchor_id in SECTION_KEYS:
+                anchor = _find_section_anchor(soup, label, anchor_id)
+                if not anchor:
+                    continue
+
+                next_anchor = _get_next_section_anchor(soup, anchor_id, SECTION_KEYS)
+                game_tables = _find_gen8_section_tables(anchor, next_anchor)
+
+                parser = SECTION_PARSERS.get(label, parse_levelup)
+                display_label = DISPLAY_LABELS.get(label, label)
+
+                for game_key, tbl in game_tables.items():
+                    html = parser(tbl, gen)
+                    if not html:
+                        continue
+
+                    if game_key == "shared":
+                        # Add to all available
+                        for gk in results:
+                            results[gk][display_label] = html
+                    elif game_key in results:
+                        results[game_key][display_label] = html
+
+            # only return multi-game if actually found content
+            if any(len(v) > 1 for v in results.values()):
+                return results
+
+    # ─── Fallback: Single-game parsing for all other cases ─────────────────
+    results = {}
+    for label, anchor_id in SECTION_KEYS:
+        anchor = _find_section_anchor(soup, label, anchor_id)
+        if anchor is None:
+            continue
+        tbl = _find_table_after(anchor)
+        if tbl is None:
+            continue
+        parser = SECTION_PARSERS.get(label, parse_levelup)
+        html = parser(tbl, gen)
+        if html:
+            display_label = DISPLAY_LABELS.get(label, label)
+            results[display_label] = html
+
+    return results if results else None
+
+
+def is_multi_game_result(result) -> bool:
+    # Check if result features multiple games (Gen 7+)
+    if not result:
+        print("No Result found.")
+        return False
+    first_val = next(iter(result.values()), None)
+    #rint(f"Trying to Determine Multi-Game Result for : {first_val}")
+    return isinstance(first_val, dict)
+
 # ─── Session state ───────────────────────────────────────────────────────────
 
 if "roster" not in st.session_state:
     st.session_state.roster = []
+if "loading" not in st.session_state:
+    st.session_state.loading = False
+    print("Set global Loading State to False")
 
 # ─── CSS injection ───────────────────────────────────────────────────────────
 
@@ -751,7 +1013,6 @@ def save_gen():
 with (st.sidebar):
     st.header("🎒 Roster")
 
-
     if st.session_state.roster:
         remove_name = None
         lookup_name = None
@@ -768,11 +1029,17 @@ with (st.sidebar):
             with c2:
                 # Lookup button with sprite
                 if st.button(name, key=f"rl_{name}", use_container_width=True):
-                    lookup_name = name
+                    if not st.session_state.loading:
+                        lookup_name = name
+                    else:
+                        print("blocked input because form is still loading")
             with c3:
                 # Remove Button
                 if st.button("✕", key=f"rr_{name}"):
-                    remove_name = name
+                    if not st.session_state.loading:
+                        remove_name = name
+                    else:
+                        print("blocked Input because form is still loading")
 
         if remove_name:
             st.session_state.roster.remove(remove_name)
@@ -783,8 +1050,7 @@ with (st.sidebar):
 
     else:
         st.caption("Put your Roster Pokemon here.")
-
-        st.divider()
+    st.divider()
 
 # ─── Title ───────────────────────────────────────────────────────────────────
 
@@ -799,7 +1065,7 @@ col1, col2, col3 = st.columns([3, 2, 1])
 if "roster_lookup" in st.session_state:
     lookup_name = st.session_state.pop("roster_lookup")
     if lookup_name in all_names:
-        st.session_state["pokemon_select"] = lookup_name
+        st.session_state["pokemon_select"] = lookup_name    # Update Dropdown Control
 
 with col1:
     # Pokemon dropdown
@@ -829,7 +1095,7 @@ with col2:
         gen_idx = gen_labels.index(saved_gen)
     else:
         gen_idx = len(gen_labels) - 1
-        print(f"Could not retrieve the generation {saved_gen} - defaulting to last available.")
+        #print(f"Could not retrieve the generation {saved_gen} - defaulting to last available.")
 
     gen_selection = st.selectbox("Generation", gen_labels, index=gen_idx, key="gen_select", on_change=save_gen) # Added On-Change event to save last gen
 
@@ -857,8 +1123,36 @@ st.divider()
 
 # ─── Fetch & display (based solely on dropdown values) ──────────────────────
 
+st.session_state.loading = True
+
 with st.spinner(f"Fetching {selected_pokemon} Gen {ROMAN[selected_gen]} learnset…"):
-    sections = fetch_learnset(selected_pokemon, selected_gen)
+    result = fetch_learnset_multi_game(selected_pokemon, selected_gen)
+
+#print(result)
+st.session_state.loading = False    # Disable Button input while loading to avoid messed up markdown
+
+if result is None:
+    st.warning(f"No learnset page found for **{selected_pokemon}** in Generation {ROMAN[selected_gen]}.")
+    st.stop()
+
+# Handle multi-game results (Gen 7)
+if is_multi_game_result(result):
+    game_keys = list(result.keys())
+    game_labels = [result[k].get("_display", k) for k in game_keys]
+
+    selected_game_label = st.radio(
+        "Select Game Version",
+        game_labels,
+        horizontal=True,
+        key=f"game_select_{selected_pokemon}_{selected_gen}"
+    )
+    selected_game_key = game_keys[game_labels.index(selected_game_label)]
+    sections = {k: v for k, v in result[selected_game_key].items() if k != "_display"}
+    #print(sections)
+else:
+    print("No Multiple games detected.")
+    sections = result
+
 
 if sections is None:
     st.warning(f"No learnset page found for **{selected_pokemon}** in Generation {ROMAN[selected_gen]}.")
@@ -868,10 +1162,15 @@ if not sections:
     st.stop()
 
 DISPLAY_ORDER = ["By leveling up", "By TM/HM", "By breeding", "By tutoring", "By a prior Evolution"]
+render_key = f"{selected_pokemon}-{selected_gen}-{time.time()}"
 
 if "By leveling up" in sections:
     st.subheader("📈 Moves learned by leveling up")
-    st.markdown(sections["By leveling up"], unsafe_allow_html=True)
+    #print(f"Trying to match to original levelup table: 'table_levelup_{selected_pokemon}_{selected_gen}'")
+    st.markdown(
+        f'<div data-render-key="{render_key}-levelup">{sections["By leveling up"]}</div>',
+        unsafe_allow_html=True
+    )
 else:
     st.info("No level-up moves found for this Pokémon/generation.")
 
@@ -883,7 +1182,13 @@ if remaining:
     tabs = st.tabs([f"{icons.get(k, '📋')} {k}" for k in remaining])
     for tab, key in zip(tabs, remaining):
         with tab:
-            st.markdown(sections[key], unsafe_allow_html=True)
+            # Unique key per section/pokemon/gen forces re-render of markdown
+            safe_key = key.replace(" ", "_").replace("/", "_")
+            #print(f"Trying to match safe_key {safe_key} to original tables based on original key {key}: 'table_{safe_key}_{selected_pokemon}_{selected_gen}'")
+            st.markdown(
+                f'<div data-render-key="{render_key}-{safe_key}">{sections[key]}</div>',
+                unsafe_allow_html=True
+            )
 
 extra = [k for k in sections if k not in DISPLAY_ORDER]
 for key in extra:
