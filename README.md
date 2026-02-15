@@ -10,11 +10,11 @@ Features:
 - Basic information about every move, including Move	Type	Cat.	Pwr.	Acc.	PP
 - Quick Pokemon name retrieval and autocompletion
 - Save Multiple Pokemon (as many as you want) in a Roster to be featured in a sidebar for quick access
+- Extensive Move Descriptions
 
 Upcoming Features:
 - Sort Tables
 - Individual Move lookup
-- Extensive Move Descriptions
 - Nuzlocke Functionality (Evolve Pokemon, Assign Nicknames & Movesets, tutor locations)
 
 Still under development, expect following issues:
