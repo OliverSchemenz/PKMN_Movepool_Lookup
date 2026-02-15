@@ -18,7 +18,5 @@ Upcoming Features:
 - Nuzlocke Functionality (Evolve Pokemon, Assign Nicknames & Movesets, tutor locations)
 
 Still under development, expect following issues:
-  - no gen 7 and 9 retrieval currently
-  - gen 8 still does not feature Let's go Pikachu! / Eevee! information
-  - Prior Evolution double column headers
+  - no gen 9 retrieval currently
   - no special moves, event moves or transfer moves from other generations (as those are typically unavailable for most players, especially in Nuzlocke runs)
